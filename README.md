@@ -56,7 +56,7 @@ Follow carefully to avoid MediaPipe errors.
 
 ---
 
-# STEP 1️⃣ Set Python Version in VS Code
+## STEP 1️⃣ Set Python Version in VS Code
 
 
 -  Open **Visual Studio Code**
@@ -101,7 +101,7 @@ Then:
 
 ---
 
-# STEP 2️⃣ Create Virtual Environment
+## STEP 2️⃣ Create Virtual Environment
 
 Open terminal in project folder:
 
