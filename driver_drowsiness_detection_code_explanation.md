@@ -3,201 +3,335 @@
 
 ```python
 # ================================
-# DRIVER DROWSINESS DETECTION SYSTEM
-# Using OpenCV + MediaPipe Face Mesh
+# IMPORTING LIBRARIES
 # ================================
 
-# -------------------------------
-# IMPORTING LIBRARIES
-# -------------------------------
-
 import cv2  
-# cv2 is OpenCV library
-# Used for computer vision tasks like:
+# cv2 is OpenCV library.
+# It is used for computer vision tasks like:
 # - Accessing webcam
-# - Reading frames
-# - Drawing on frames
-# - Showing video window
+# - Processing frames
+# - Drawing text & shapes on screen
+
+import numpy as np  
+# numpy is used for numerical operations.
+# Here we use it for:
+# - Creating arrays
+# - Calculating distances (norm)
 
 import mediapipe as mp  
-# mediapipe is Google’s ML library
-# We rename it as "mp"
-# 'as' keyword gives an alias (short name)
+# mediapipe is a Google library.
+# We import it as "mp" (alias).
+# Alias syntax:  import library_name as short_name
+# This allows us to write mp instead of mediapipe everywhere.
 
-import time  
-# time module is used to track how long eyes stay closed
+import tkinter as tk  
+# tkinter is Python’s built-in GUI library.
+# "as tk" is aliasing (short name).
+
+from tkinter import Label  
+# This imports only Label class from tkinter.
+# Syntax: from module import specific_class
+
+from PIL import Image, ImageTk  
+# PIL = Python Imaging Library.
+# Image converts array to image.
+# ImageTk allows showing images inside tkinter GUI.
+
+import sys  
+# sys module gives system-related functions.
+# We use sys.exit() to safely exit program.
 
 
-# -------------------------------
-# ACCESSING MEDIAPIPE SOLUTIONS
-# -------------------------------
+# ================================
+# INITIALIZE MEDIAPIPE FACE MESH
+# ================================
 
-mp_face_mesh = mp.solutions.face_mesh
-# mp → mediapipe
-# solutions → prebuilt ML solutions
-# face_mesh → facial landmark detector (468 face points)
-
-mp_drawing = mp.solutions.drawing_utils
-# drawing_utils helps to draw face landmarks
-
-
-# -------------------------------
-# INITIALIZE FACE MESH
-# -------------------------------
+mp_face_mesh = mp.solutions.face_mesh  
+# mp.solutions → prebuilt AI solutions in MediaPipe
+# face_mesh → face landmark detection module
+# We store it in variable mp_face_mesh
 
 face_mesh = mp_face_mesh.FaceMesh(
+    static_image_mode=False,  # False = video mode (better tracking)
     max_num_faces=1,          # Detect only 1 face
-    refine_landmarks=True,    # Better eye landmarks
-    min_detection_confidence=0.5,  # Minimum confidence to detect face
-    min_tracking_confidence=0.5    # Confidence to track face
+    refine_landmarks=True     # More accurate eye & lip landmarks
 )
+# FaceMesh() creates the face detection object.
+# Arguments inside () are called PARAMETERS.
+# parameter_name=value syntax is called keyword arguments.
 
-# FaceMesh() is a constructor
-# It creates an object that detects face landmarks
+
+# ================================
+# THRESHOLD VALUES
+# ================================
+
+EAR_THRESHOLD = 0.2  
+# EAR = Eye Aspect Ratio threshold.
+# If EAR < 0.2 → eyes considered closed.
+
+MAR_THRESHOLD = 0.4  
+# MAR = Mouth Aspect Ratio threshold.
+# If MAR > 0.4 → mouth considered open (yawning).
+
+CONSEC_FRAMES = 5  
+# If eyes stay closed for 5 consecutive frames,
+# then we count it as a drowsy event.
 
 
-# -------------------------------
-# START WEBCAM
-# -------------------------------
+# ================================
+# GLOBAL COUNTERS
+# ================================
+
+frame_count = 0  
+# Counts how many frames eyes are continuously closed.
+
+eye_closed_count = 0  
+# Counts how many times eyes were closed.
+
+yawn_times = 0  
+# Counts yawns.
+
+
+# STATE FLAGS (Boolean Variables)
+
+eyes_closed_prev = False  
+# Boolean variable.
+# False means eyes were NOT closed previously.
+
+mouth_open_prev = False  
+# False means mouth was NOT open previously.
+
+
+# ================================
+# LANDMARK INDEXES
+# ================================
+
+left_eye_indices = [33, 160, 158, 133, 153, 144]  
+# List of landmark indexes for left eye.
+# [] means list in Python.
+
+right_eye_indices = [362, 385, 387, 263, 373, 380]
+
+mouth_indices = [61, 291, 13, 14]
+
+
+# ================================
+# FUNCTION: CALCULATE EAR
+# ================================
+
+def calculate_EAR(landmarks, indices, w, h):
+# def = defines a function
+# landmarks → detected face landmarks
+# indices → which landmark numbers to use
+# w → frame width
+# h → frame height
+
+    eye = np.array([
+        (landmarks[i].x * w, landmarks[i].y * h)
+        for i in indices
+    ])
+    # This is list comprehension syntax.
+    # for i in indices → loop through each index.
+    # landmarks[i].x → normalized x coordinate
+    # multiply by w to convert into pixel coordinate.
+    # np.array converts list into numpy array.
+
+    hor = np.linalg.norm(eye[0] - eye[3])
+    # np.linalg.norm → calculates distance.
+    # eye[0] - eye[3] → subtracts two coordinate points.
+
+    ver1 = np.linalg.norm(eye[1] - eye[5])
+    ver2 = np.linalg.norm(eye[2] - eye[4])
+
+    return (ver1 + ver2) / (2.0 * hor)
+    # return sends value back to where function was called.
+    # 2.0 ensures floating point division.
+
+
+# ================================
+# FUNCTION: CALCULATE MAR
+# ================================
+
+def calculate_MAR(landmarks, indices, w, h):
+
+    mouth = np.array([
+        (landmarks[i].x * w, landmarks[i].y * h)
+        for i in indices
+    ])
+
+    hor = np.linalg.norm(mouth[0] - mouth[1])
+    ver = np.linalg.norm(mouth[2] - mouth[3])
+
+    return ver / hor
+
+
+# ================================
+# TKINTER GUI WINDOW
+# ================================
+
+window = tk.Tk()
+# Tk() creates main window object.
+
+window.title("Driver Drowsiness and Yawning Detection")
+# .title() sets window title.
+
+window.configure(bg="lightblue")
+# .configure() changes properties.
+# bg = background color.
+
+
+# Create Label widget
+status_label = Label(window,
+                     text="Status: Waiting...",
+                     font=("Helvetica", 14),
+                     bg="lightblue")
+
+status_label.pack()
+# .pack() places widget inside window.
+
+
+video_label = Label(window)
+video_label.pack()
+
+
+# ================================
+# CAMERA INITIALIZATION
+# ================================
 
 cap = cv2.VideoCapture(0)
-# VideoCapture(0) → 0 means default webcam
-# If you had external camera → use 1
+# VideoCapture(0) → 0 means default webcam.
+# cap is camera object.
 
 
-# -------------------------------
-# VARIABLES FOR DROWSINESS LOGIC
-# -------------------------------
-
-closed_eyes_start_time = None
-# Will store time when eyes close
-
-drowsy_threshold = 2
-# If eyes closed for more than 2 seconds → drowsy
-
-
-# -------------------------------
-# MAIN LOOP (RUNS CONTINUOUSLY)
-# -------------------------------
+# ================================
+# MAIN LOOP
+# ================================
 
 while True:
-    ret, frame = cap.read()
+# Infinite loop.
+
+    success, frame = cap.read()
     # cap.read() returns:
-    # ret → True/False (camera working or not)
-    # frame → image captured
+    # success → True/False
+    # frame → image from camera
 
-    if not ret:
-        break
-        # If camera fails, stop loop
+    if not success:
+        sys.exit(1)
+        # Exit program if camera fails.
 
-
-    # Convert BGR to RGB
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    # OpenCV reads image in BGR format
-    # MediaPipe requires RGB format
+    # Convert BGR to RGB.
+    # cv2 uses BGR by default.
+    # MediaPipe expects RGB.
+
+    results = face_mesh.process(rgb_frame)
+    # Process frame and detect face landmarks.
+
+    frame_height, frame_width, _ = frame.shape
+    # frame.shape returns (height, width, channels)
+    # _ means ignore third value.
 
 
-    # Process the frame using face mesh
-    result = face_mesh.process(rgb_frame)
-    # process() runs ML model on image
+    if results.multi_face_landmarks:
+    # If face detected
 
+        for face_landmarks in results.multi_face_landmarks:
+        # Loop through detected faces.
 
-    # Check if face detected
-    if result.multi_face_landmarks:
-        # multi_face_landmarks → list of detected faces
-
-        for face_landmarks in result.multi_face_landmarks:
-
-            # Draw face landmarks on screen
-            mp_drawing.draw_landmarks(
-                frame,
-                face_landmarks,
-                mp_face_mesh.FACEMESH_TESSELATION
+            left_EAR = calculate_EAR(
+                face_landmarks.landmark,
+                left_eye_indices,
+                frame_width,
+                frame_height
             )
-            # frame → image
-            # face_landmarks → detected points
-            # FACEMESH_TESSELATION → full face mesh lines
+
+            right_EAR = calculate_EAR(
+                face_landmarks.landmark,
+                right_eye_indices,
+                frame_width,
+                frame_height
+            )
+
+            EAR = (left_EAR + right_EAR) / 2.0
+
+            MAR = calculate_MAR(
+                face_landmarks.landmark,
+                mouth_indices,
+                frame_width,
+                frame_height
+            )
 
 
-            # -------------------------------
-            # EYE LANDMARK INDEXES
-            # -------------------------------
+            # ====================
+            # EYE LOGIC
+            # ====================
 
-            left_eye_top = face_landmarks.landmark[159]
-            left_eye_bottom = face_landmarks.landmark[145]
+            if EAR < EAR_THRESHOLD:
+            # if statement syntax:
+            # if condition:
 
-            # landmark[index]
-            # landmark is list of 468 points
-            # Each landmark has:
-            # x → horizontal position
-            # y → vertical position
-            # z → depth
+                frame_count += 1
+                # += means increment by 1.
 
-            # Calculate eye distance
-            eye_distance = abs(left_eye_top.y - left_eye_bottom.y)
-            # abs() → absolute value
-            # If distance small → eye closed
+                if frame_count >= CONSEC_FRAMES:
 
+                    if not eyes_closed_prev:
+                    # not reverses boolean value.
 
-            # -------------------------------
-            # DROWSINESS LOGIC
-            # -------------------------------
-
-            if eye_distance < 0.01:
-                # If eyes nearly closed
-
-                if closed_eyes_start_time is None:
-                    closed_eyes_start_time = time.time()
-                    # time.time() → current timestamp
-
-                else:
-                    elapsed_time = time.time() - closed_eyes_start_time
-                    # Calculate how long eyes closed
-
-                    if elapsed_time > drowsy_threshold:
-                        cv2.putText(
-                            frame,
-                            "DROWSY ALERT!",
-                            (50, 100),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            1,
-                            (0, 0, 255),
-                            3
-                        )
-                        # putText() syntax:
-                        # frame → image
-                        # text → string to display
-                        # (50,100) → position
-                        # FONT_HERSHEY_SIMPLEX → font style
-                        # 1 → font size
-                        # (0,0,255) → color (Red in BGR)
-                        # 3 → thickness
+                        eye_closed_count += 1
+                        eyes_closed_prev = True
 
             else:
-                closed_eyes_start_time = None
-                # Reset if eyes open
+                frame_count = 0
+                eyes_closed_prev = False
 
 
-    # Show window
-    cv2.imshow("Driver Drowsiness Detection", frame)
-    # imshow(window_name, image)
+            # ====================
+            # YAWN LOGIC
+            # ====================
+
+            if MAR > MAR_THRESHOLD:
+
+                if not mouth_open_prev:
+                    yawn_times += 1
+                    mouth_open_prev = True
+
+            else:
+                mouth_open_prev = False
 
 
-    # Exit condition
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-        # waitKey(1) → waits 1 millisecond
-        # ord('q') → ASCII value of q
-        # If q pressed → stop
+            # ====================
+            # DISPLAY TEXT
+            # ====================
+
+            cv2.putText(
+                frame,
+                f"EAR: {round(EAR,2)}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 0),
+                2
+            )
+            # f"" is f-string (formatted string).
+            # {round(EAR,2)} rounds value to 2 decimals.
+
+    # Convert frame for tkinter
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    img = Image.fromarray(frame_rgb)
+    imgtk = ImageTk.PhotoImage(image=img)
+
+    video_label.imgtk = imgtk
+    video_label.configure(image=imgtk)
+
+    window.update()
+    # Updates tkinter window each loop.
 
 
-# -------------------------------
-# RELEASE CAMERA & CLOSE WINDOWS
-# -------------------------------
-
+# Release resources
 cap.release()
-# Releases webcam
-
 cv2.destroyAllWindows()
-# Closes all OpenCV windows
+window.quit()
+
 ```
